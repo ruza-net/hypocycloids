@@ -5,7 +5,7 @@ use rui::{LocalRect, Modifiers, PaintIndex, Vger, WHITE, canvas, rui, state, vge
 
 const ITER_COUNT: usize = 10000;
 const TICK_SPEED: f32 = 1.0;
-const SCALE: f32 = 50.0;
+const INIT_SCALE: f32 = 50.0;
 const N: usize = 7;
 
 fn expi(t: f32) -> Complex32 {
@@ -29,10 +29,10 @@ fn G(phi: f32, n: usize, pt: Complex32) -> Complex32 {
     expi(phi) * pt + expi(-(n as f32) * phi)
 }
 
-fn draw_pt(pt: Complex32, vger: &mut Vger, frame: LocalRect, paint: PaintIndex) {
+fn draw_pt(pt: Complex32, vger: &mut Vger, frame: LocalRect, scale: f32, paint: PaintIndex) {
     let [mut x, mut y] = [pt.re, pt.im];
-    x *= SCALE;
-    y *= SCALE;
+    x *= scale;
+    y *= scale;
 
     x += frame.center().x;
     y += frame.center().y;
@@ -60,16 +60,23 @@ fn draw_dashed_circ(
     }
 }
 
-fn draw_hycy(n: usize, vger: &mut Vger, frame: LocalRect, paint: PaintIndex) {
+fn draw_hycy(n: usize, vger: &mut Vger, frame: LocalRect, scale: f32, paint: PaintIndex) {
     for k in 0..ITER_COUNT {
         let t = k as f32 / ITER_COUNT as f32;
         let pt = H(n, 2.0 * PI * t);
 
-        draw_pt(pt, vger, frame, paint);
+        draw_pt(pt, vger, frame, scale, paint);
     }
 }
 
-fn draw_sliding(params: &[f32], n: usize, vger: &mut Vger, frame: LocalRect, paint: PaintIndex) {
+fn draw_sliding(
+    params: &[f32],
+    n: usize,
+    vger: &mut Vger,
+    frame: LocalRect,
+    scale: f32,
+    paint: PaintIndex,
+) {
     for j in 0..ITER_COUNT {
         let t = 2.0 * PI * j as f32 / ITER_COUNT as f32;
         let mut pt = H(n, t);
@@ -77,47 +84,85 @@ fn draw_sliding(params: &[f32], n: usize, vger: &mut Vger, frame: LocalRect, pai
         for k in n..params.len() {
             pt = G(params[k], k + 1, pt);
         }
-        draw_pt(pt, vger, frame, paint);
+        draw_pt(pt, vger, frame, scale, paint);
     }
 }
 
-fn draw_cascade(t: f32, vger: &mut Vger, frame: LocalRect) {
-    for n in 1..N {
-        let paint = vger.color_paint(Color::gray(n as f32 / (N + 1) as f32));
+fn draw_cascade(m: usize, t: f32, vger: &mut Vger, frame: LocalRect, scale: f32) {
+    for n in 1..m {
+        let paint = vger.color_paint(Color::gray(n as f32 / (m + 1) as f32));
 
-        let params = vec![t; N];
-        draw_sliding(&params, n, vger, frame, paint);
+        let params = vec![t; m];
+        draw_sliding(&params, n, vger, frame, scale, paint);
     }
-    let paint = vger.color_paint(Color::gray(N as f32 / (N + 1) as f32));
-    draw_hycy(N, vger, frame, paint);
+    let paint = vger.color_paint(Color::gray(m as f32 / (m + 1) as f32));
+    draw_hycy(m, vger, frame, scale, paint);
 }
 
 fn main() {
     rui(state(
-        || 0.0,
-        |t, _| {
-            canvas(move |cx, frame, vger| {
-                let white_paint = vger.color_paint(WHITE);
-                let magenta_paint = vger.color_paint(Color::MAGENTA);
-                let light_gray_paint = vger.color_paint(Color::gray(0.7));
+        || INIT_SCALE,
+        |scale, _| {
+            state(
+                || 1,
+                move |m, _| {
+                    state(
+                        || 0.0,
+                        move |t, _| {
+                            canvas(move |cx, frame, vger| {
+                                let white_paint = vger.color_paint(WHITE);
+                                let magenta_paint = vger.color_paint(Color::MAGENTA);
+                                let light_gray_paint = vger.color_paint(Color::gray(0.7));
+                                let scale = cx[scale];
 
-                vger.fill_rect(frame, 0.0, white_paint);
+                                vger.fill_rect(frame, 0.0, white_paint);
 
-                draw_dashed_circ(
-                    frame.center().into(),
-                    (N + 1) as f32 * SCALE,
-                    1.0,
-                    200,
-                    vger,
-                    light_gray_paint,
-                );
+                                draw_dashed_circ(
+                                    frame.center().into(),
+                                    (cx[m] + 1) as f32 * scale,
+                                    1.0,
+                                    200,
+                                    vger,
+                                    light_gray_paint,
+                                );
 
-                // draw_hycy(N, vger, frame, magenta_paint);
-                draw_cascade(cx[t], vger, frame);
-            })
-            .anim(move |cx, delta| {
-                cx[t] += delta * TICK_SPEED;
-            })
+                                draw_hycy(cx[m], vger, frame, scale, magenta_paint);
+                                // draw_cascade(cx[m], cx[t], vger, frame, scale);
+                            })
+                            .anim(move |cx, delta| {
+                                cx[t] += delta * TICK_SPEED;
+                            })
+                            .key(move |cx, k| match k {
+                                rui::Key::ArrowLeft => {
+                                    if cx[m] > 1 {
+                                        cx[m] -= 1;
+                                    }
+                                }
+                                rui::Key::ArrowRight => {
+                                    cx[m] += 1;
+                                }
+                                _ => {}
+                            })
+                            .drag(move |cx, offset, gesture, btn| {
+                                let Some(btn) = btn else {
+                                    return;
+                                };
+
+                                match btn {
+                                    rui::MouseButton::Left => {}
+                                    rui::MouseButton::Right => {
+                                        cx[scale] += offset.y;
+                                        if cx[scale] < 1.0 {
+                                            cx[scale] = 1.0;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            })
+                        },
+                    )
+                },
+            )
         },
     ));
 }
